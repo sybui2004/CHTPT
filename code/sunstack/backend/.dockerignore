@@ -1,0 +1,19 @@
+# Python bytecode
+**/__pycache__/
+**/*.py[cod]
+
+# Node / frontend (not needed for backend images)
+frontend/
+
+# Local env files and secrets
+**/.env
+**/.env.*
+**/*.pem
+**/secrets/
+
+# VCS
+.git/
+
+# Misc
+.agent/
+.vscode/

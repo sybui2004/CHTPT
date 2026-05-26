@@ -1,0 +1,86 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+env/
+
+# Node / frontend
+node_modules/
+**/node_modules/
+dist/
+build/
+.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+.env
+
+# SunStack environment files
+code/sunstack/.env
+code/sunstack/.env_prod
+code/sunstack/.env_prod_node1
+code/sunstack/.env_prod_node2
+code/sunstack/backend/services/*/.env
+code/sunstack/frontend/.env
+
+# Logs
+*.log
+logs/
+**/logs/
+es.log
+code/sunstack/logs/
+code/sunstack/backend/logs/
+
+# Runtime data / databases
+code/elk/data/
+code/sunstack/databases/mongo_data/
+code/sunstack/databases/redis_data/
+code/sunstack/databases/**/data/
+code/sunstack/frontend/public/seed/
+dump/
+tmp/
+temp/
+
+# Docker / generated local files
+.docker/
+docker-data/
+*.pid
+*.sock
+
+# Terraform
+**/.terraform/
+**/.terraform.lock.hcl
+**/terraform.tfstate
+**/terraform.tfstate.*
+**/*.tfvars
+**/*.tfvars.json
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Ansible local inventory / credentials
+**/iac/ansible/inventory
+**/iac/ansible/*.retry
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+gcs-key.json

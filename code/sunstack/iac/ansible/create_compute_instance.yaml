@@ -1,0 +1,54 @@
+- name: Create Compute Engine instances
+  hosts: localhost
+  vars:
+    project_id: shopbee-485000
+    zone: asia-southeast1-b
+    machine_type: n2-standard-8
+    disk_size_gb: 100
+    service_account_file: "{{ playbook_dir }}/secrets/shopbee-485000-8459e98cfb12.json"
+  tasks:
+    - name: Bring up BTL application instances
+      google.cloud.gcp_compute_instance:
+        name: "{{ item }}"
+        machine_type: "{{ machine_type }}"
+        zone: "{{ zone }}"
+        project: "{{ project_id }}"
+        auth_kind: serviceaccount
+        service_account_file: "{{ service_account_file }}"
+        disks:
+          - auto_delete: true
+            boot: true
+            initialize_params:
+              source_image: projects/ubuntu-os-cloud/global/images/family/ubuntu-2204-lts
+              disk_size_gb: "{{ disk_size_gb }}"
+              disk_type: pd-ssd
+        network_interfaces:
+          - network:
+              selfLink: global/networks/default
+            access_configs:
+              - name: External NAT
+                type: ONE_TO_ONE_NAT
+        state: present
+      loop:
+        - btl-app-vm-1
+        - btl-app-vm-2
+
+    - name: Allow BTL application traffic
+      google.cloud.gcp_compute_firewall:
+        name: allow-btl-app-http
+        network:
+          selfLink: global/networks/default
+        allowed:
+          - ip_protocol: TCP
+            ports:
+              - '22'
+              - '80'
+              - '443'
+        source_ranges:
+          - 0.0.0.0/0
+        direction: INGRESS
+        description: Allow BTL frontend, backend, and HTTP/S traffic
+        project: "{{ project_id }}"
+        auth_kind: serviceaccount
+        service_account_file: "{{ service_account_file }}"
+        state: present

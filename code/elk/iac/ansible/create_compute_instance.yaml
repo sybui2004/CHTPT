@@ -1,0 +1,51 @@
+- name: Create Compute Engine instances
+  hosts: localhost
+  vars:
+    project_id: shopbee-485000
+    zone: asia-southeast1-b
+    machine_type: n2-standard-8
+    disk_size_gb: 100
+    service_account_file: "{{ playbook_dir }}/secrets/shopbee-485000-8459e98cfb12.json"
+  tasks:
+    - name: Bring up ELK central log instance
+      google.cloud.gcp_compute_instance:
+        name: btl-elk-central-vm
+        machine_type: "{{ machine_type }}"
+        zone: "{{ zone }}"
+        project: "{{ project_id }}"
+        auth_kind: serviceaccount
+        service_account_file: "{{ service_account_file }}"
+        disks:
+          - auto_delete: true
+            boot: true
+            initialize_params:
+              source_image: projects/ubuntu-os-cloud/global/images/family/ubuntu-2204-lts
+              disk_size_gb: "{{ disk_size_gb }}"
+              disk_type: pd-ssd
+        network_interfaces:
+          - network:
+              selfLink: global/networks/default
+            access_configs:
+              - name: External NAT
+                type: ONE_TO_ONE_NAT
+        state: present
+
+    - name: Allow ELK traffic
+      google.cloud.gcp_compute_firewall:
+        name: allow-btl-elk-central
+        network:
+          selfLink: global/networks/default
+        allowed:
+          - ip_protocol: TCP
+            ports:
+              - '5044'
+              - '5601'
+              - '9200'
+        source_ranges:
+          - 0.0.0.0/0
+        direction: INGRESS
+        description: Allow Logstash Beats input, Kibana UI, and Elasticsearch API
+        project: "{{ project_id }}"
+        auth_kind: serviceaccount
+        service_account_file: "{{ service_account_file }}"
+        state: present

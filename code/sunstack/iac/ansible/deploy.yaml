@@ -1,0 +1,372 @@
+- name: Deploy BTL application VM
+  hosts: btl_app
+  become: yes
+  vars:
+    app_name: btl
+    app_user: sy
+    app_root: /opt/btl
+    btl_repo_root: "{{ playbook_dir }}/../.."
+    btl_node_index: "{{ groups['btl_app'].index(inventory_hostname) + 1 }}"
+    btl_env_file: ".env_prod_node{{ btl_node_index }}"
+    elk_inventory_host: "{{ (groups.get('elk_central', ['34.21.229.164']))[0] }}"
+    elk_host: "{{ ((groups.get('elk_central', []) | length) > 0) | ternary(hostvars[elk_inventory_host].ansible_host | default(elk_inventory_host), '34.21.229.164') }}"
+    btl_mongo_inventory_host: "{{ (groups.get('btl_mongo', []))[0] | default('') }}"
+    btl_mongo_host: "{{ hostvars[btl_mongo_inventory_host].ansible_host | default(btl_mongo_inventory_host) }}"
+    btl_mongo_uri: "mongodb://{{ btl_mongo_username }}:{{ btl_mongo_password }}@{{ btl_mongo_host }}:27017/bdc?authSource=admin"
+    btl_mongo_username: root
+    btl_mongo_password: root
+    btl_domain_names:
+      - sunstack.org
+      - www.sunstack.org
+    btl_primary_domain: "{{ btl_domain_names[0] }}"
+    btl_certbot_email: ""
+    # TLS is terminated by the GCP Load Balancer for the two app VMs.
+    # Running certbot on one VM is unreliable because ACME HTTP-01 requests may
+    # be routed to the other VM.
+    btl_enable_letsencrypt: false
+    btl_letsencrypt_hosts:
+      - "{{ groups['btl_app'][0] }}"
+    btl_runtime_services:
+      - filebeat
+      - front-end
+      - gateway
+      - auth-service
+      - user-service
+      - product-service
+      - order-service
+      - shop-service
+      - payment-service
+      - chat-service
+      - upload-service
+      - redis
+  tasks:
+    - name: Install system packages
+      apt:
+        pkg:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - git
+          - rsync
+          - software-properties-common
+          - python3-pip
+          - nginx
+          - certbot
+          - python3-certbot-nginx
+          - ufw
+        state: present
+        update_cache: true
+
+    - name: Add Docker GPG apt key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker repository
+      apt_repository:
+        repo: deb https://download.docker.com/linux/ubuntu jammy stable
+        state: present
+
+    - name: Install Docker Engine and Compose plugin
+      apt:
+        pkg:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+        update_cache: true
+
+    - name: Ensure Docker is running
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Add deploy user to docker group
+      user:
+        name: "{{ app_user }}"
+        groups: docker
+        append: yes
+
+    - name: Create application directory
+      file:
+        path: "{{ app_root }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0755"
+
+    - name: Copy BTL project to app VM
+      become: no
+      synchronize:
+        src: "{{ btl_repo_root }}/"
+        dest: "{{ app_root }}/"
+        delete: yes
+        rsync_opts:
+          - "--exclude=.git"
+          - "--exclude=.idea"
+          - "--exclude=.vscode"
+          - "--exclude=.agent"
+          - "--exclude=iac/ansible/secrets"
+          - "--exclude=backend/.m2"
+          - "--exclude=backend/logs"
+          - "--exclude=logs"
+          - "--exclude=es.log"
+          - "--exclude=databases/**"
+          - "--exclude=node_modules"
+          - "--exclude=frontend/node_modules"
+
+    - name: Create application log directory
+      file:
+        path: "{{ app_root }}/logs"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0755"
+
+    - name: Create Redis data directory
+      file:
+        path: "{{ app_root }}/databases/redis_data"
+        state: directory
+        owner: "999"
+        group: "999"
+        mode: "0755"
+        recurse: yes
+
+    - name: Use production environment as runtime .env
+      copy:
+        src: "{{ app_root }}/{{ btl_env_file }}"
+        dest: "{{ app_root }}/.env"
+        remote_src: yes
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0644"
+
+    - name: Configure Filebeat central Logstash endpoint
+      lineinfile:
+        path: "{{ app_root }}/.env"
+        regexp: "^LOGSTASH_HOST="
+        line: "LOGSTASH_HOST={{ elk_host }}:5044"
+        create: yes
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0644"
+
+    - name: Configure environment
+      lineinfile:
+        path: "{{ app_root }}/.env"
+        regexp: "^ENVIRONMENT="
+        line: "ENVIRONMENT=prod"
+        create: yes
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0644"
+
+    - name: Show selected production env file
+      debug:
+        msg: "Using {{ btl_env_file }} for {{ inventory_hostname }}"
+
+    - name: Validate runtime env file exists
+      stat:
+        path: "{{ app_root }}/.env"
+      register: btl_runtime_env
+
+    - name: Fail when runtime env file is missing
+      fail:
+        msg: "Missing {{ app_root }}/.env after copying {{ btl_env_file }}"
+      when: not btl_runtime_env.stat.exists
+
+    - name: Fail when shared MongoDB host is not configured
+      fail:
+        msg: "Missing [btl_mongo] host in {{ playbook_dir }}/inventory. Add the MongoDB VM public IP before deploying app VMs."
+      when: btl_mongo_inventory_host | length == 0
+
+    - name: Configure shared MongoDB URI
+      lineinfile:
+        path: "{{ app_root }}/.env"
+        regexp: "^MONGO_URI="
+        line: "MONGO_URI={{ btl_mongo_uri }}"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0644"
+
+    - name: Allow BTL ports through UFW
+      community.general.ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop:
+        - "22"
+        - "80"
+        - "443"
+
+    - name: Enable UFW
+      community.general.ufw:
+        state: enabled
+        policy: deny
+
+    - name: Configure Nginx reverse proxy
+      copy:
+        dest: "/etc/nginx/sites-available/{{ btl_primary_domain }}"
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          server {
+              listen 80;
+              server_name {{ btl_domain_names | join(' ') }};
+
+              client_max_body_size 20m;
+
+              location /api/ {
+                  proxy_pass http://127.0.0.1:8000/api/;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+              }
+
+              location /oauth2/ {
+                  proxy_pass http://127.0.0.1:8000/oauth2/;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+              }
+
+              location /login/oauth2/ {
+                  proxy_pass http://127.0.0.1:8000/login/oauth2/;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+              }
+
+              location /ws {
+                  proxy_pass http://127.0.0.1:8000/ws;
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection "upgrade";
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+              }
+
+              location /actuator/ {
+                  proxy_pass http://127.0.0.1:8000/actuator/;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+              }
+
+              location /chatbot/ {
+                  proxy_pass http://127.0.0.1:8000/;
+                  proxy_http_version 1.1;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+              }
+
+              location / {
+                  proxy_pass http://127.0.0.1:5173/;
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection "upgrade";
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+              }
+          }
+
+    - name: Enable BTL Nginx site
+      file:
+        src: "/etc/nginx/sites-available/{{ btl_primary_domain }}"
+        dest: "/etc/nginx/sites-enabled/{{ btl_primary_domain }}"
+        state: link
+        force: yes
+
+    - name: Disable default Nginx site
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+
+    - name: Test Nginx configuration
+      command: nginx -t
+      changed_when: false
+
+    - name: Reload Nginx
+      service:
+        name: nginx
+        state: reloaded
+        enabled: yes
+
+    - name: Check existing Let's Encrypt certificate
+      stat:
+        path: "/etc/letsencrypt/live/{{ btl_primary_domain }}/fullchain.pem"
+      register: btl_letsencrypt_cert
+      when:
+        - btl_enable_letsencrypt | bool
+        - inventory_hostname in btl_letsencrypt_hosts
+
+    - name: Issue Let's Encrypt certificate with Nginx
+      command: >-
+        certbot --nginx
+        --non-interactive
+        --agree-tos
+        {{ (btl_certbot_email | length > 0) | ternary('--email ' ~ btl_certbot_email, '--register-unsafely-without-email') }}
+        --redirect
+        -d {{ btl_domain_names | join(' -d ') }}
+      register: btl_certbot_issue
+      changed_when: "'Successfully received certificate' in btl_certbot_issue.stdout or 'Congratulations' in btl_certbot_issue.stdout"
+      when:
+        - btl_enable_letsencrypt | bool
+        - inventory_hostname in btl_letsencrypt_hosts
+        - not (btl_letsencrypt_cert.stat.exists | default(false))
+
+    - name: Renew Let's Encrypt certificate if needed
+      command: certbot renew --quiet
+      changed_when: false
+      when:
+        - btl_enable_letsencrypt | bool
+        - inventory_hostname in btl_letsencrypt_hosts
+        - btl_letsencrypt_cert.stat.exists | default(false)
+
+    - name: Validate Docker Compose production config
+      command: docker compose -p "{{ app_name }}" -f docker-compose-prod.yml config --quiet
+      args:
+        chdir: "{{ app_root }}"
+      changed_when: false
+
+    - name: Pull BTL service images
+      command: docker compose -p "{{ app_name }}" -f docker-compose-prod.yml pull --ignore-buildable
+      args:
+        chdir: "{{ app_root }}"
+      register: btl_compose_pull
+      changed_when: "'Downloaded newer image' in btl_compose_pull.stdout or 'Pull complete' in btl_compose_pull.stdout"
+
+    - name: Build BTL service images
+      command: docker compose -p "{{ app_name }}" -f docker-compose-prod.yml build --pull
+      args:
+        chdir: "{{ app_root }}"
+
+    - name: Start BTL services
+      command: docker compose -p "{{ app_name }}" -f docker-compose-prod.yml up -d --remove-orphans {{ btl_runtime_services | join(' ') }}
+      args:
+        chdir: "{{ app_root }}"
+
+    - name: Show BTL containers
+      command: docker compose -f docker-compose-prod.yml ps
+      args:
+        chdir: "{{ app_root }}"
+      register: btl_compose_ps
+      changed_when: false
+
+    - name: Print BTL container status
+      debug:
+        var: btl_compose_ps.stdout_lines

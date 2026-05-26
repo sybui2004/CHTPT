@@ -1,0 +1,489 @@
+services:
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:8.12.2
+    container_name: filebeat
+    user: root
+    command: filebeat -e -strict.perms=false
+    volumes:
+      # Local filebeat config
+      - ./elk/filebeat-app-vm.yml:/usr/share/filebeat/filebeat.yml:ro
+      # App logs folder (same folder your app compose writes to)
+      - ./logs:/logs:ro
+      - ./logs:/app/logs:ro
+      # Filebeat internal data
+      - filebeat-data:/usr/share/filebeat/data
+    environment:
+      # Identify this VM
+      - HOSTNAME=${HOSTNAME:-app-vm}
+      - HOST_IP=${HOST_IP:-unknown}
+      - ENVIRONMENT=${ENVIRONMENT:-prod}
+      - LOG_TYPE=${LOG_TYPE:-btl}
+
+      # Central logstash endpoint (IP of ELK VM)
+      - LOGSTASH_HOST=${LOGSTASH_HOST:-127.0.0.1:5044}
+    restart: unless-stopped
+
+  front-end:
+    build: ./frontend/.
+    container_name: front-end
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    networks:
+      - sunstack_network
+
+  gateway:
+    build:
+      context: ./backend
+      dockerfile: services/gateway/Dockerfile
+    container_name: gateway
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./.env
+    environment:
+      TZ: ${TZ:-Asia/Ho_Chi_Minh}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      LOG_DIR: /app/logs
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_BACKUP_DAYS: ${LOG_BACKUP_DAYS:-7}
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      user-service:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+      shop-service:
+        condition: service_healthy
+      payment-service:
+        condition: service_healthy
+      chat-service:
+        condition: service_healthy
+      upload-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sunstack_network
+
+  auth-service:
+    build:
+      context: ./backend
+      dockerfile: services/auth-service/Dockerfile
+    container_name: auth-service
+    ports:
+      - "8001:8001"
+    env_file:
+      - ./.env
+    environment:
+      TZ: ${TZ:-Asia/Ho_Chi_Minh}
+      MONGO_URI: mongodb://root:root@mongo:27017
+      MONGO_DATABASE: ${AUTH_MONGO_DATABASE}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      LOG_DIR: /app/logs
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_BACKUP_DAYS: ${LOG_BACKUP_DAYS:-7}
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sunstack_network
+
+  user-service:
+    build:
+      context: ./backend
+      dockerfile: services/user-service/Dockerfile
+    container_name: user-service
+    ports:
+      - "8002:8002"
+    env_file:
+      - ./.env
+    environment:
+      TZ: ${TZ:-Asia/Ho_Chi_Minh}
+      MONGO_URI: mongodb://root:root@mongo:27017
+      MONGO_DATABASE: ${USER_MONGO_DATABASE}
+      AUTH_SERVICE_URL: ${AUTH_SERVICE_URL}
+      SHOP_SERVICE_URL: ${SHOP_SERVICE_URL}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      LOG_DIR: /app/logs
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_BACKUP_DAYS: ${LOG_BACKUP_DAYS:-7}
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      auth-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sunstack_network
+
+  product-service:
+    build:
+      context: ./backend
+      dockerfile: services/product-service/Dockerfile
+    container_name: product-service
+    ports:
+      - "8003:8003"
+    env_file:
+      - ./.env
+    environment:
+      TZ: ${TZ:-Asia/Ho_Chi_Minh}
+      MONGO_URI: mongodb://root:root@mongo:27017
+      MONGO_DATABASE: ${PRODUCT_MONGO_DATABASE}
+      AUTH_SERVICE_URL: ${AUTH_SERVICE_URL}
+      SHOP_SERVICE_URL: ${SHOP_SERVICE_URL}
+      USER_SERVICE_URL: ${USER_SERVICE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      LOG_DIR: /app/logs
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_BACKUP_DAYS: ${LOG_BACKUP_DAYS:-7}
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      auth-service:
+        condition: service_healthy
+      user-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/health', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sunstack_network
+
+  order-service:
+    build:
+      context: ./backend
+      dockerfile: services/order-service/Dockerfile
+    container_name: order-service
+    ports:
+      - "8004:8004"
+    env_file:
+      - ./.env
+    environment:
+      TZ: ${TZ:-Asia/Ho_Chi_Minh}
+      MONGO_URI: mongodb://root:root@mongo:27017
+      MONGO_DATABASE: ${ORDER_MONGO_DATABASE}
+      AUTH_SERVICE_URL: ${AUTH_SERVICE_URL}
+      PRODUCT_SERVICE_URL: ${PRODUCT_SERVICE_URL}
+      SHOP_SERVICE_URL: ${SHOP_SERVICE_URL}
+      USER_SERVICE_URL: ${USER_SERVICE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      LOG_DIR: /app/logs
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_BACKUP_DAYS: ${LOG_BACKUP_DAYS:-7}
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      auth-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8004/health', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sunstack_network
+
+  shop-service:
+    build:
+      context: ./backend
+      dockerfile: services/shop-service/Dockerfile
+    container_name: shop-service
+    ports:
+      - "8005:8005"
+    env_file:
+      - ./.env
+    environment:
+      TZ: ${TZ:-Asia/Ho_Chi_Minh}
+      MONGO_URI: mongodb://root:root@mongo:27017
+      MONGO_DATABASE: ${SHOP_MONGO_DATABASE}
+      AUTH_SERVICE_URL: ${AUTH_SERVICE_URL}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      ORDER_SERVICE_URL: ${ORDER_SERVICE_URL}
+      PRODUCT_SERVICE_URL: ${PRODUCT_SERVICE_URL}
+      USER_SERVICE_URL: ${USER_SERVICE_URL}
+      LOG_DIR: /app/logs
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_BACKUP_DAYS: ${LOG_BACKUP_DAYS:-7}
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      auth-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8005/health', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sunstack_network
+
+  payment-service:
+    build:
+      context: ./backend
+      dockerfile: services/payment-service/Dockerfile
+    container_name: payment-service
+    ports:
+      - "8006:8006"
+    env_file:
+      - ./.env
+    environment:
+      TZ: ${TZ:-Asia/Ho_Chi_Minh}
+      MONGO_URI: mongodb://root:root@mongo:27017
+      MONGO_DATABASE: ${PAYMENT_MONGO_DATABASE}
+      AUTH_SERVICE_URL: ${AUTH_SERVICE_URL}
+      VNPAY_URL: ${VNPAY_URL}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      LOG_DIR: /app/logs
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_BACKUP_DAYS: ${LOG_BACKUP_DAYS:-7}
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      auth-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8006/health', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sunstack_network
+
+  chat-service:
+    build:
+      context: ./backend
+      dockerfile: services/chat-service/Dockerfile
+    container_name: chat-service
+    ports:
+      - "8010:8010"
+    env_file:
+      - ./.env
+    environment:
+      TZ: ${TZ:-Asia/Ho_Chi_Minh}
+      MONGO_URI: mongodb://root:root@mongo:27017
+      MONGO_DATABASE: ${CHAT_MONGO_DATABASE}
+      AUTH_SERVICE_URL: ${AUTH_SERVICE_URL}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      LOG_DIR: /app/logs
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_BACKUP_DAYS: ${LOG_BACKUP_DAYS:-7}
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      auth-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8010/health', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sunstack_network
+
+  upload-service:
+    build:
+      context: ./backend
+      dockerfile: services/upload-service/Dockerfile
+    container_name: upload-service
+    ports:
+      - "8011:8011"
+    env_file:
+      - ./.env
+    environment:
+      TZ: ${TZ:-Asia/Ho_Chi_Minh}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      GCS_BUCKET_NAME: ${GCS_BUCKET_NAME}
+      GCS_PROJECT_ID: ${GCS_PROJECT_ID}
+      LOG_DIR: /app/logs
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_BACKUP_DAYS: ${LOG_BACKUP_DAYS:-7}
+    volumes:
+      - ./backend/services/upload-service/secrets:/app/secrets:ro
+      - ./logs:/app/logs
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8011/health', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sunstack_network
+
+  mongo:
+    image: mongo:6
+    container_name: btl-mongo-1
+    command: mongod --replSet my-mongo-set --bind_ip_all
+    ports:
+      - "27018:27017"
+    volumes:
+      - ./databases/mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sunstack_network
+
+  mongo-express:
+    image: mongo-express
+    container_name: mongo-express
+    restart: always
+    ports:
+      - "8081:8081"
+    environment:
+      TZ: ${TZ:-Asia/Ho_Chi_Minh}
+      ME_CONFIG_MONGODB_ADMINUSERNAME: root
+      ME_CONFIG_MONGODB_ADMINPASSWORD: root
+      ME_CONFIG_MONGODB_URL: mongodb://root:root@mongo:27017/product_db?authSource=admin&replicaSet=my-mongo-set
+      ME_CONFIG_BASICAUTH_USERNAME: root
+      ME_CONFIG_BASICAUTH_PASSWORD: root
+    networks:
+      - sunstack_network
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  mongo_init:
+    image: mongo:6
+    depends_on:
+      mongo:
+        condition: service_healthy
+    entrypoint: |
+      sh -c 'sleep 10; mongosh --host mongo --eval "rs.initiate({_id: \"my-mongo-set\", members: [{ _id: 1, host: \"mongo:27017\" }]});" ; until mongosh --host mongo --quiet --eval "db.isMaster().ismaster" | grep -q "true"; do sleep 2; done; mongosh --host mongo --eval "db.getSiblingDB(\"admin\").createUser({user: \"root\", pwd: \"root\", roles: [{ role: \"root\", db: \"admin\" }, { role: \"readWrite\", db: \"product_db\" }, { role: \"readWrite\", db: \"auth_db\" }, { role: \"readWrite\", db: \"shop_db\" }, { role: \"readWrite\", db: \"payment_db\" }, { role: \"readWrite\", db: \"chat_db\" }, { role: \"readWrite\", db: \"bdc\" }]})"; tail -f /dev/null'
+    healthcheck:
+      test: ["CMD-SHELL", "exit 0"]
+      interval: 10s
+      timeout: 3s
+      retries: 1
+      start_period: 60s
+    networks:
+      - sunstack_network
+
+  mongo_import:
+    build: ./databases/mongo_import
+    container_name: mongo_import
+    command: ["node", "app.js"]
+    depends_on:
+      mongo_init:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - sunstack_network
+
+  mongo_seed:
+    build: ./databases/mongo_import
+    container_name: mongo_seed
+    command: ["node", "seed_demo_products.js"]
+    environment:
+      TZ: ${TZ:-Asia/Ho_Chi_Minh}
+      MONGO_URI: mongodb://root:root@mongo:27017/product_db?directConnection=true&authSource=admin
+    depends_on:
+      mongo_import:
+        condition: service_completed_successfully
+    restart: "no"
+    networks:
+      - sunstack_network
+
+  redis:
+    image: redis:7
+    container_name: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./databases/redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sunstack_network
+
+networks:
+  sunstack_network:
+    driver: bridge
+    name: sunstack_network
+
+volumes:
+  filebeat-data:

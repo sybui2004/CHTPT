@@ -1,0 +1,59 @@
+# Filebeat agent for APP VM(s)
+# Collect logs from ./logs (mounted to /logs in container) and ship to central Logstash.
+
+name: ${HOSTNAME}
+
+tags: ["${ENVIRONMENT:dev}", "${LOG_TYPE:app_vm}"]
+
+fields:
+  env: ${ENVIRONMENT:dev}
+  log_type: ${LOG_TYPE:app_vm}
+  server_name: ${HOSTNAME}
+  server_ip: ${HOST_IP:unknown}
+
+fields_under_root: true
+
+filebeat.inputs:
+  - type: log
+    id: btl-app-logs
+    enabled: true
+
+    paths:
+      - /app/logs/*.log
+
+    encoding: utf-8
+
+    # Best-effort multiline: stacktraces usually start with whitespace or "Traceback"
+    multiline.type: pattern
+    multiline.pattern: '^(\s+|Traceback \(most recent call last\):)'
+    multiline.negate: false
+    multiline.match: after
+    multiline.max_lines: 500
+
+    processors:
+      # Extract service name from: /app/logs/<service>.log
+      - dissect:
+          tokenizer: "/app/logs/%{service}.log%{?suffix}"
+          field: "log.file.path"
+          target_prefix: ""
+          ignore_failure: true
+
+output.logstash:
+  hosts: ["${LOGSTASH_HOST}"]
+  loadbalance: true
+  worker: 2
+
+queue.mem:
+  events: 4096
+  flush.min_events: 512
+  flush.timeout: 5s
+
+bulk_max_size: 1024
+
+logging.level: info
+logging.to_files: true
+logging.files:
+  path: /var/log/filebeat
+  name: filebeat
+  keepfiles: 7
+  permissions: 0644

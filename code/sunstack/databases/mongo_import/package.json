@@ -1,0 +1,16 @@
+{
+  "name": "data-importer-js",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Service to fetch data from API and store in MongoDB",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "seed:products": "node seed_demo_products.js",
+    "seed:images:download": "node ../seed_assets/download_seed_images.js"
+  },
+  "dependencies": {
+    "axios": "^1.10.0",
+    "mongoose": "^8.16.0"
+  }
+}

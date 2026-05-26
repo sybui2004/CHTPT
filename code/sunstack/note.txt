@@ -1,0 +1,29 @@
+cd /opt/sunstack
+
+sudo docker compose -f docker-compose-prod.yml run --rm mongo_import_prod npm run seed:products
+
+gcloud compute instances add-metadata sunstack-vm \
+  --zone=asia-southeast1-b \
+  --metadata ssh-keys="sy:ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKnbFq+kjSNNPZRqFYPIhocaNckJ5qpgOg0kUBUbojpk sy@sy-GF63-Thin-11UC"
+
+sudo nano /etc/hosts để sửa mapping ip với domain
+
+  SERVER_BASE_URL: http://34.177.89.162
+  FE_BASE_URL: http://34.177.89.162:5173
+  APP_CORS_ALLOWED_ORIGINS: http://34.177.89.162:8080,http://34.177.89.162:5173
+
+cd /home/sy/Documents/PTIT/BTL
+export GOOGLE_APPLICATION_CREDENTIALS=/home/sy/Documents/PTIT/BTL/secrets/gcs-key.json
+GCS_BUCKET_NAME=shopbee-485000-tmdt-bucket-a1b7287e ./scripts/upload_seed_images_to_gcs.sh
+
+docker compose -f docker-compose-prod.yml up -d --build mongo_import_prod
+
+
+sudo chown -R 1000:1000 ./databases/es_data
+sudo chmod -R 775 ./databases/es_data
+
+Chờ thanh toán: chỉ đơn bank_transfer chưa thanh toán và chưa quá hạn.
+Chờ xác nhận: đơn đang chờ shop xác nhận.
+Chờ vận chuyển: gom các trạng thái sau khi shop xác nhận và sau khi shop bấm bàn giao.
+Đã nhận: gộp luôn phần đã nhận/hoàn thành.
+Đã hủy: gồm đơn bị hủy bởi buyer/shop và đơn chuyển khoản hết hạn thanh toán.

@@ -1,0 +1,124 @@
+- name: Deploy central ELK logging VM
+  hosts: elk_central
+  become: yes
+  vars:
+    elk_user: sy
+    elk_root: /opt/elk
+    elk_repo_root: "{{ playbook_dir }}/../.."
+  tasks:
+    - name: Install system packages
+      apt:
+        pkg:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - git
+          - rsync
+          - software-properties-common
+          - python3-pip
+          - ufw
+        state: present
+        update_cache: true
+
+    - name: Add Docker GPG apt key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker repository
+      apt_repository:
+        repo: deb https://download.docker.com/linux/ubuntu jammy stable
+        state: present
+
+    - name: Install Docker Engine and Compose plugin
+      apt:
+        pkg:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+        update_cache: true
+
+    - name: Ensure Docker is running
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Add deploy user to docker group
+      user:
+        name: "{{ elk_user }}"
+        groups: docker
+        append: yes
+
+    - name: Create ELK directory
+      file:
+        path: "{{ elk_root }}"
+        state: directory
+        owner: "{{ elk_user }}"
+        group: "{{ elk_user }}"
+        mode: "0755"
+
+    - name: Copy ELK stack to central VM
+      synchronize:
+        src: "{{ elk_repo_root }}/"
+        dest: "{{ elk_root }}/"
+        delete: yes
+        rsync_opts:
+          - "--exclude=.git"
+          - "--exclude=data"
+          - "--exclude=iac/ansible/secrets"
+
+    - name: Create Elasticsearch data directory
+      file:
+        path: "{{ elk_root }}/data"
+        state: directory
+        owner: "1000"
+        group: "0"
+        mode: "0775"
+        recurse: yes
+
+    - name: Set kernel setting required by Elasticsearch
+      sysctl:
+        name: vm.max_map_count
+        value: "262144"
+        state: present
+        reload: yes
+
+    - name: Allow ELK ports through UFW
+      community.general.ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop:
+        - "22"
+        - "5044"
+        - "5601"
+        - "9200"
+
+    - name: Enable UFW
+      community.general.ufw:
+        state: enabled
+        policy: deny
+
+    - name: Start ELK services
+      community.docker.docker_compose_v2:
+        project_src: "{{ elk_root }}"
+        project_name: btl-elk
+        files:
+          - docker-compose-elk.yml
+        state: present
+        remove_orphans: true
+
+    - name: Show ELK containers
+      command: docker compose -f docker-compose-elk.yml ps
+      args:
+        chdir: "{{ elk_root }}"
+      register: elk_compose_ps
+      changed_when: false
+
+    - name: Print ELK container status
+      debug:
+        var: elk_compose_ps.stdout_lines
