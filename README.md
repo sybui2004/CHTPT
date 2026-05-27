@@ -102,3 +102,31 @@ Các bước cài đặt, cấu hình môi trường, chạy Docker Compose, see
 - `code/elk/README.md`: hướng dẫn chạy hệ thống ELK và kết nối log từ SunStack.
 
 Hãy đọc và thực hiện theo đúng thứ tự: `code/sunstack/README.md` trước, sau đó đến `code/elk/README.md`.
+
+## 🚀 Kết quả sản phẩm
+
+Dưới đây là một số hình ảnh minh họa cho các chức năng và giao diện chính của hệ thống SunStack sau khi triển khai thành công:
+
+### 1. Trang chủ (Home Page)
+Giao diện chính của hệ thống hiển thị danh sách sản phẩm nổi bật, gợi ý hôm nay và các danh mục.
+![Trang chủ](imgs/home_page.png)
+
+### 2. Trang Đăng nhập (Login Page)
+Giao diện đăng nhập hỗ trợ xác thực bằng tài khoản hệ thống và OAuth2 Google.
+![Trang Đăng nhập](imgs/login_page.png)
+
+### 3. Chi tiết Sản phẩm (Product Detail)
+Trang hiển thị thông tin chi tiết của một sản phẩm, bao gồm giá, hình ảnh, mô tả, thông tin cửa hàng bán và tùy chọn thêm vào giỏ hàng.
+![Chi tiết Sản phẩm](imgs/product_detail.png)
+
+### 4. Giỏ hàng và Thanh toán (Cart & Checkout)
+Giao diện danh sách sản phẩm trong giỏ hàng và quy trình thanh toán (hỗ trợ tích hợp VNPay).
+![Giỏ hàng và Thanh toán](imgs/checkout_page.png)
+
+### 5. Kênh Người Bán (Seller Channel)
+Giao diện cửa hàng (C2C) nơi người bán quản lý, đăng bán sản phẩm và xem các đơn hàng của mình.
+![Trang Cửa hàng](imgs/shop_page.png)
+
+### 6. Quản lý Đơn hàng (Order Management)
+Giao diện theo dõi trạng thái đơn hàng và lịch sử mua hàng của người mua.
+![Quản lý Đơn hàng](imgs/order_management.png)
